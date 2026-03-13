@@ -1,0 +1,5 @@
+# Trivia Game Server Configuration
+server_port=5555
+min_players_per_team=1
+max_players_per_team=4
+question_timeout_seconds=15

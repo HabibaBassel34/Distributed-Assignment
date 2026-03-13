@@ -1,0 +1,182 @@
+# Trivia Questions Bank
+# Format: ID, Category, Difficulty, Question, A-D choices, Answer
+
+ID: 1
+Category: Geography
+Difficulty: easy
+Question: What is the capital of France?
+A: London
+B: Berlin
+C: Paris
+D: Madrid
+Answer: C
+
+ID: 2
+Category: Geography
+Difficulty: easy
+Question: Which continent is Egypt located in?
+A: Asia
+B: Europe
+C: South America
+D: Africa
+Answer: D
+
+ID: 3
+Category: Geography
+Difficulty: medium
+Question: What is the longest river in the world?
+A: Amazon
+B: Nile
+C: Yangtze
+D: Mississippi
+Answer: B
+
+ID: 4
+Category: Geography
+Difficulty: hard
+Question: What is the capital of Kazakhstan?
+A: Almaty
+B: Nur-Sultan (Astana)
+C: Bishkek
+D: Tashkent
+Answer: B
+
+ID: 5
+Category: Science
+Difficulty: easy
+Question: What is the chemical symbol for water?
+A: WA
+B: H2O
+C: HO2
+D: OX
+Answer: B
+
+ID: 6
+Category: Science
+Difficulty: easy
+Question: How many planets are in our Solar System?
+A: 7
+B: 9
+C: 8
+D: 10
+Answer: C
+
+ID: 7
+Category: Science
+Difficulty: medium
+Question: What is the speed of light in a vacuum (approximately)?
+A: 300,000 km/s
+B: 150,000 km/s
+C: 500,000 km/s
+D: 1,000,000 km/s
+Answer: A
+
+ID: 8
+Category: Science
+Difficulty: hard
+Question: What is the atomic number of gold?
+A: 47
+B: 79
+C: 29
+D: 82
+Answer: B
+
+ID: 9
+Category: Math
+Difficulty: easy
+Question: What is 15 x 4?
+A: 45
+B: 55
+C: 60
+D: 75
+Answer: C
+
+ID: 10
+Category: Math
+Difficulty: easy
+Question: What is the square root of 144?
+A: 11
+B: 14
+C: 12
+D: 13
+Answer: C
+
+ID: 11
+Category: Math
+Difficulty: medium
+Question: What is the value of Pi (to 2 decimal places)?
+A: 3.12
+B: 3.14
+C: 3.16
+D: 3.18
+Answer: B
+
+ID: 12
+Category: Math
+Difficulty: hard
+Question: What is the derivative of sin(x)?
+A: -sin(x)
+B: -cos(x)
+C: tan(x)
+D: cos(x)
+Answer: D
+
+ID: 13
+Category: History
+Difficulty: easy
+Question: In which year did World War II end?
+A: 1943
+B: 1944
+C: 1945
+D: 1946
+Answer: C
+
+ID: 14
+Category: History
+Difficulty: medium
+Question: Who was the first President of the United States?
+A: Abraham Lincoln
+B: Thomas Jefferson
+C: George Washington
+D: John Adams
+Answer: C
+
+ID: 15
+Category: History
+Difficulty: hard
+Question: In which year did the French Revolution begin?
+A: 1776
+B: 1789
+C: 1799
+D: 1804
+Answer: B
+
+ID: 16
+Category: Technology
+Difficulty: easy
+Question: What does 'CPU' stand for?
+A: Central Processing Unit
+B: Computer Personal Unit
+C: Central Program Utility
+D: Core Processing Unit
+Answer: A
+
+ID: 17
+Category: Technology
+Difficulty: medium
+Question: Which programming language is used for Android development?
+A: Swift
+B: Kotlin
+C: Python
+D: Ruby
+Answer: B
+
+ID: 18
+Category: Technology
+Difficulty: hard
+Question: What does 'TCP' stand for in networking?
+A: Transfer Control Protocol
+B: Transmission Control Protocol
+C: Terminal Connection Protocol
+D: Transport Communication Protocol
+Answer: B
