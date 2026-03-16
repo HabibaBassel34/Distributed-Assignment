@@ -18,8 +18,7 @@ public class ClientHandler implements Runnable {
     private User currentUser;
     private volatile boolean running = true;
 
-    // Fix for Problem 1 & 2: when a GameSession is running, the menu loop must
-    // not call readLine() — GameSession owns the input stream during a game.
+
     private volatile boolean inGame = false;
 
     public ClientHandler(Socket socket, AuthManager authManager,
@@ -45,8 +44,7 @@ public class ClientHandler implements Runnable {
                 return;
             }
 
-            // NEW: if the logged-in user is "admin", show the admin panel instead of the game menu
-            // ASSUMPTION: admin username is exactly "admin" (case-sensitive) and is in users.txt
+
             if (currentUser.getUsername().equals("admin")) {
                 showAdminPanel();
             } else {
@@ -183,12 +181,10 @@ public class ClientHandler implements Runnable {
         return false;
     }
 
-    // Main Menu
 
     private void handleMainMenu() throws IOException {
         while (running) {
-            // If a GameSession has taken over this handler's input stream,
-            // block here and do NOT call readLine() until the game ends.
+
             if (inGame) {
                 try { Thread.sleep(200); } catch (InterruptedException ignored) {}
                 continue;
@@ -199,17 +195,14 @@ public class ClientHandler implements Runnable {
             send("==============================================");
             send("  1) Play Single Player");
             send("  2) Play Multiplayer (Teams)");
-            send("  3) Join Public Game Room");  // NEW - Additional Feature 2
-            send("  4) Play Random Trivia");      // NEW - Additional Feature 3
+            send("  3) Join Public Game Room");
+            send("  4) Play Random Trivia");
             send("  5) View My Score History");
             send("  6) View Available Categories");
             send("  -) Quit");
             send("Enter choice: ");
 
-            // Small pause before reading — gives the game thread time to set
-            // inGame=true if a multiplayer match was just triggered, so we
-            // don't call readLine() and accidentally consume the player's
-            // first game answer as a menu choice.
+
             try { Thread.sleep(150); } catch (InterruptedException ignored) {}
             if (inGame) continue;
 
@@ -219,7 +212,6 @@ public class ClientHandler implements Runnable {
                 break;
             }
 
-            // Double-check: if game started while blocked on readLine, discard input
             if (inGame) continue;
 
             switch (choice.trim()) {
@@ -230,11 +222,9 @@ public class ClientHandler implements Runnable {
                     handleMultiplayerSetup();
                     break;
                 case "3":
-                    // NEW: Additional Feature 2 - Public Game Room
                     gameServer.joinPublicRoom(currentUser, this);
                     break;
                 case "4":
-                    // NEW: Additional Feature 3 - Random Trivia
                     handleRandomTrivia();
                     break;
                 case "5":
@@ -249,11 +239,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // NEW: Admin Panel - Additional Feature 4
-    // Shown instead of the game menu when username == "admin"
-    // ASSUMPTION: Admin can only view stats - cannot play games
-    // -----------------------------------------------------------------------
+
 
     private void showAdminPanel() throws IOException {
         while (running) {
@@ -277,11 +263,9 @@ public class ClientHandler implements Runnable {
 
             switch (choice.trim()) {
                 case "1":
-                    // Fix: read directly from the connected clients map (never drifts)
                     send("Total connected players: " + gameServer.getConnectedCount());
                     break;
                 case "2":
-                    // getAllUsers() comes from AuthManager via GameServer
                     send("Player with most wins: "
                             + stats.getMostWins(gameServer.getAuthManager().getAllUsers()));
                     break;
@@ -298,7 +282,6 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Single Player Setup
 
     private void handleSinglePlayerSetup() throws IOException {
         send("\n--- Single Player Setup ---");
@@ -323,24 +306,19 @@ public class ClientHandler implements Runnable {
         GameSession session = gameServer.createSinglePlayerSession(
                 currentUser, category, difficulty, numQuestions);
         if (session != null) {
-            // Mark as in-game so handleMainMenu() stops reading from socket
             setInGame(true);
             session.start();
             setInGame(false);
         }
     }
 
-    // -----------------------------------------------------------------------
-    // NEW: Random Trivia - Additional Feature 3
-    // Picks questions from all categories and difficulties randomly.
-    // ASSUMPTION: Player just picks how many questions (1 to total bank size).
-    // -----------------------------------------------------------------------
+
 
     private void handleRandomTrivia() throws IOException {
         send("\n--- Random Trivia ---");
         send("Questions will be picked randomly from all categories and difficulties.");
 
-        int max = questionBank.getTotalCount(); // total questions in the bank
+        int max = questionBank.getTotalCount();
         if (max == 0) {
             send("No questions available.");
             return;
@@ -358,7 +336,6 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Multiplayer
 
     private void handleMultiplayerSetup() throws IOException {
         send("\n--- Multiplayer Menu ---");
@@ -437,7 +414,6 @@ public class ClientHandler implements Runnable {
         gameServer.joinTeam(teamName.trim(), currentUser, this);
     }
 
-    // Score / Category helpers
 
     private void showScoreHistory() {
         send("\n--- Your Score History ---");
@@ -506,9 +482,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // I/O
 
-    // Disconnection handling: GameSession checks this to skip dead sockets
     public boolean isConnected() {
         return running && socket != null && !socket.isClosed();
     }
@@ -529,8 +503,7 @@ public class ClientHandler implements Runnable {
             }
             return line;
         } catch (java.net.SocketTimeoutException e) {
-            // Timeout is NOT a disconnect - rethrow without marking client as dead.
-            // waitForRoomStart() uses this to periodically check room.isGameStarted().
+
             throw e;
         } catch (IOException e) {
             running = false;
@@ -538,14 +511,12 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Sets a read timeout on the socket in milliseconds.
-    // Pass 0 to disable (block forever). Used by waitForRoomStart().
+
     public void setSoTimeout(int millis) {
         try { socket.setSoTimeout(millis); } catch (IOException ignored) {}
     }
 
-    // Fix for Problem 1 & 2: GameSession calls setInGame(true) before starting
-    // and setInGame(false) when done, so the menu loop stays out of the way.
+
     public void setInGame(boolean value) {
         this.inGame = value;
     }

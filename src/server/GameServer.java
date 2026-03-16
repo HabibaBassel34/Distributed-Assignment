@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class GameServer {
 
-    // --- existing config ---
     private int port;
     private int maxPlayersPerTeam;
     private int minPlayersPerTeam;
@@ -22,35 +21,27 @@ public class GameServer {
     private AuthManager  authManager;
     private QuestionBank questionBank;
 
-    // Connected clients map: username -> handler
     private Map<String, ClientHandler> connectedClients = new ConcurrentHashMap<>();
 
-    // Active teams waiting for players / opponents
     private Map<String, Team> teams = new ConcurrentHashMap<>();
 
-    // Teams whose leader typed "start" - waiting for an opponent
-    // ConcurrentHashMap.newKeySet() gives a thread-safe Set
+
     private Set<Team> readyTeams = ConcurrentHashMap.newKeySet();
 
-    // --- NEW: public room config (from config.txt) ---
-    // ASSUMPTION: defaults are min=2, max=4, 5 questions if keys are missing
+
     private int minPlayersPerRoom;
     private int maxPlayersPerRoom;
     private int publicRoomQuestions;
 
-    // --- NEW: lookup server config (from config.txt) ---
-    // ASSUMPTION: disabled by default; set use_lookup_server=true to enable
+
     private boolean useLookupServer;
     private String  lookupServerHost;
     private int     lookupServerPort;
 
-    // --- NEW: LookupClient - null when feature is disabled ---
     private LookupClient lookupClient;
 
-    // --- NEW: admin stats tracker ---
     private AdminStats adminStats = new AdminStats();
 
-    // --- NEW: active public game rooms (runtime only, cleared on shutdown) ---
     private Map<String, GameRoom> gameRooms  = new ConcurrentHashMap<>();
     private int                   roomCounter = 0;
 
@@ -69,7 +60,6 @@ public class GameServer {
     private void loadServerData() throws IOException {
         Map<String, String> config = FileLoader.loadConfig(CONFIG_FILE);
 
-        // existing keys
         this.port                   = Integer.parseInt(config.getOrDefault("server_port",              "5555"));
         this.maxPlayersPerTeam      = Integer.parseInt(config.getOrDefault("max_players_per_team",     "4"));
         this.minPlayersPerTeam      = Integer.parseInt(config.getOrDefault("min_players_per_team",     "1"));
@@ -80,12 +70,10 @@ public class GameServer {
         List<Question> questions = FileLoader.loadQuestions(QUESTIONS_FILE);
         this.questionBank = new QuestionBank(questions);
 
-        // NEW: public room keys
         this.minPlayersPerRoom   = Integer.parseInt(config.getOrDefault("min_players_per_room",   "2"));
         this.maxPlayersPerRoom   = Integer.parseInt(config.getOrDefault("max_players_per_room",   "4"));
         this.publicRoomQuestions = Integer.parseInt(config.getOrDefault("public_room_questions",  "5"));
 
-        // NEW: lookup server keys
         this.useLookupServer  = Boolean.parseBoolean(config.getOrDefault("use_lookup_server",  "false"));
         this.lookupServerHost = config.getOrDefault("lookup_server_host", "localhost");
         this.lookupServerPort = Integer.parseInt(config.getOrDefault("lookup_server_port", "5556"));
@@ -102,9 +90,7 @@ public class GameServer {
                 + " | Question timeout: " + questionTimeoutSeconds + "s");
     }
 
-    // -----------------------------------------------------------------------
-    // Main server loop
-    // -----------------------------------------------------------------------
+
 
     public void start() {
         System.out.println("[INFO] Listening on port " + port + "...\n");
@@ -122,12 +108,7 @@ public class GameServer {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // NEW: central question fetcher
-    // Tries LookupServer first; falls back to local QuestionBank if disabled
-    // or if LookupServer returns nothing (e.g. it's down).
-    // ASSUMPTION: empty list from LookupServer = server is down or no match found.
-    // -----------------------------------------------------------------------
+
 
     public List<Question> getQuestions(String category, String difficulty, int count) {
         if (useLookupServer && lookupClient != null) {
@@ -138,7 +119,6 @@ public class GameServer {
         return questionBank.getQuestions(category, difficulty, count);
     }
 
-    // Random trivia: null params = no filter = all categories and difficulties mixed
     public List<Question> getRandomQuestions(int count) {
         if (useLookupServer && lookupClient != null) {
             List<Question> fromServer = lookupClient.fetchQuestions(null, null, count);
@@ -148,19 +128,17 @@ public class GameServer {
         return questionBank.getRandomQuestions(count);
     }
 
-    // -----------------------------------------------------------------------
-    // Client registry - updated to track admin stats
-    // -----------------------------------------------------------------------
+
 
     public void registerClient(String username, ClientHandler handler) {
         connectedClients.put(username, handler);
-        adminStats.playerConnected(); // NEW: track for admin panel
+        adminStats.playerConnected();
         System.out.println("[INFO] '" + username + "' logged in. Online: " + connectedClients.size());
     }
 
     public void unregisterClient(String username) {
         connectedClients.remove(username);
-        adminStats.playerDisconnected(); // NEW: track for admin panel
+        adminStats.playerDisconnected();
         System.out.println("[INFO] '" + username + "' disconnected. Online: " + connectedClients.size());
         User user = authManager.getUser(username);
         if (user != null) {
@@ -169,7 +147,6 @@ public class GameServer {
                 if (team.getMemberCount() == 0)
                     teams.remove(team.getName());
             }
-            // NEW: also clean up any public room the player was waiting in
             for (GameRoom room : gameRooms.values()) {
                 room.removeMember(user);
                 if (room.getMemberCount() == 0) gameRooms.remove(room.getRoomId());
@@ -177,9 +154,6 @@ public class GameServer {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Single Player
-    // -----------------------------------------------------------------------
 
     public GameSession createSinglePlayerSession(User user, String category,
             String difficulty, int numQuestions) {
@@ -189,13 +163,11 @@ public class GameServer {
             handler.send("[ERROR] No questions found for the selected options.");
             return null;
         }
-        // Fix: count questions for admin stats
         adminStats.recordQuestionsPlayed(questions.size());
         return new GameSession(List.of(handler), List.of(user),
                 questions, questionTimeoutSeconds, "single", authManager);
     }
 
-    // NEW: Random trivia session - Additional Feature 3
     public GameSession createRandomSession(User user, int numQuestions) {
         ClientHandler handler = connectedClients.get(user.getUsername());
         List<Question> questions = getRandomQuestions(numQuestions);
@@ -203,16 +175,11 @@ public class GameServer {
             handler.send("[ERROR] No questions available.");
             return null;
         }
-        // Fix: count questions for admin stats
         adminStats.recordQuestionsPlayed(questions.size());
-        // gameType = "random" so the score record is labelled differently
         return new GameSession(List.of(handler), List.of(user),
                 questions, questionTimeoutSeconds, "random", authManager);
     }
 
-    // -----------------------------------------------------------------------
-    // Teams
-    // -----------------------------------------------------------------------
 
     public boolean teamExists(String teamName) {
         return teams.containsKey(teamName);
@@ -244,10 +211,6 @@ public class GameServer {
         handler.send("You joined team '" + teamName + "'. Waiting for the leader to start...");
         handler.send("Type '-' to leave the team.");
 
-        // Block here with a socket timeout so we can detect when gameStarted=true.
-        // Without this, handleMainMenu() would run immediately and compete with
-        // GameSession for this player's socket input once the leader starts the game.
-        // ASSUMPTION: same 200ms timeout as public rooms for consistency.
         handler.setSoTimeout(200);
         try {
             while (!team.isGameStarted() && !team.isCancelled()) {
@@ -259,44 +222,34 @@ public class GameServer {
                         handler.send("You left the team.");
                         return;
                     }
-                    // Any other input while waiting is ignored
                 } catch (java.net.SocketTimeoutException e) {
-                    continue; // loop and re-check team.isGameStarted()
                 } catch (Exception e) {
                     team.removeMember(user);
                     return;
                 }
             }
         } finally {
-            handler.setSoTimeout(0); // always reset so socket works normally
+            handler.setSoTimeout(0);
         }
 
-        // If game was cancelled (leader quit), just return to menu
         if (team.isCancelled()) return;
 
-        // Spin until the game finishes.
-        // inGame was set to true by startTeamGame() BEFORE gameStarted=true,
-        // so this spin-wait will always see inGame=true here.
+
         while (handler.isInGame()) {
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
         }
     }
 
     public String[] getAvailableTeams() {
-        // Only show teams that still have open spots (not full, not started)
         return teams.values().stream()
                 .filter(t -> !t.isGameStarted() && !t.isFull())
                 .map(t -> t.getName() + " (" + t.getMemberCount() + "/" + t.getMaxPlayers() + " players)")
                 .toArray(String[]::new);
     }
 
-    // Called by Team.waitForGame() when the leader types "start".
-    // Adds this team to the ready set, then tries to find an opponent.
-    // ASSUMPTION: Both teams must be full and have equal member counts to start.
     public synchronized void tryMatchTeam(Team incomingTeam) {
         if (incomingTeam.isCancelled() || incomingTeam.isGameStarted()) return;
 
-        // Team must be full before it can be matched (ensures equal sizes)
         if (!incomingTeam.isFull()) {
             incomingTeam.broadcast("Cannot start yet: your team needs "
                     + (incomingTeam.getMaxPlayers() - incomingTeam.getMemberCount())
@@ -308,20 +261,17 @@ public class GameServer {
         readyTeams.add(incomingTeam);
         System.out.println("[INFO] Team '" + incomingTeam.getName() + "' ready. Ready teams: " + readyTeams.size());
 
-        // Look for another ready team with the same size
         for (Team opponent : readyTeams) {
             if (opponent == incomingTeam) continue;
             if (opponent.isCancelled() || opponent.isGameStarted()) continue;
 
             if (opponent.getMemberCount() == incomingTeam.getMemberCount()) {
-                // Match found - remove both from ready set and start
                 readyTeams.remove(incomingTeam);
                 readyTeams.remove(opponent);
                 System.out.println("[INFO] Matched: '" + incomingTeam.getName() + "' vs '" + opponent.getName() + "'");
                 startTeamGame(incomingTeam, opponent);
                 return;
             } else {
-                // Sizes don't match - inform both and remove the incoming team
                 String msg = "Cannot start: unequal team sizes. "
                         + incomingTeam.getName() + "=" + incomingTeam.getMemberCount()
                         + " vs " + opponent.getName() + "=" + opponent.getMemberCount()
@@ -333,7 +283,6 @@ public class GameServer {
             }
         }
 
-        // No opponent yet - stay in ready set and wait
         incomingTeam.broadcast("[TEAM " + incomingTeam.getName() + "] Waiting for an opposing team...");
     }
 
@@ -347,17 +296,12 @@ public class GameServer {
             return false;
         }
 
-        // Snapshot handlers before setting any flags
         List<ClientHandler> allHandlers = new ArrayList<>(teamA.getMemberHandlers());
         allHandlers.addAll(teamB.getMemberHandlers());
         List<User> allPlayers = new ArrayList<>(teamA.getMembers());
         allPlayers.addAll(teamB.getMembers());
 
-        // CRITICAL ORDER FIX: set inGame=true for ALL players BEFORE setGameStarted(true).
-        // Leaders are spin-waiting in Team.waitForGame() on gameStarted.
-        // Members are blocking in joinTeam() on gameStarted.
-        // Both check isInGame() immediately after seeing gameStarted=true —
-        // inGame must already be true or they escape to the main menu.
+
         for (ClientHandler h : allHandlers) {
             h.setInGame(true);
         }
@@ -367,8 +311,7 @@ public class GameServer {
         teams.remove(teamA.getName());
         teams.remove(teamB.getName());
 
-        // Inform both teams whose settings are used
-        // ASSUMPTION: teamA (first to type "start") sets the game parameters
+
         String settingsMsg = "Game settings by team '" + teamA.getName() + "': "
                 + "Category=" + teamA.getCategory()
                 + " | Difficulty=" + teamA.getDifficulty()
@@ -376,23 +319,18 @@ public class GameServer {
         teamA.broadcast(settingsMsg);
         teamB.broadcast(settingsMsg);
 
-        // Use getQuestions() so LookupServer is used when enabled
         List<Question> questions = getQuestions(
                 teamA.getCategory(), teamA.getDifficulty(), teamA.getNumQuestions());
 
-        // Fix: count questions for admin stats
         adminStats.recordQuestionsPlayed(questions.size());
 
         GameSession session = new GameSession(allHandlers, allPlayers, questions,
                 questionTimeoutSeconds, "multiplayer", authManager);
 
         new Thread(() -> {
-            // 350ms delay: members in joinTeam() have a 200ms read timeout,
-            // so by 350ms everyone has exited their wait loop and no thread
-            // competes with GameSession for the socket.
+
             try { Thread.sleep(350); } catch (InterruptedException ignored) {}
             session.start();
-            // Game over - release all players back to the main menu
             for (ClientHandler h : allHandlers) {
                 h.setInGame(false);
             }
@@ -400,23 +338,16 @@ public class GameServer {
         return true;
     }
 
-    // Removes a team from both the teams map and the readyTeams set.
-    // Called by Team.waitForGame() when the leader cancels or disconnects.
+
     public void removeTeam(String teamName) {
         teams.remove(teamName);
         readyTeams.removeIf(t -> t.getName().equals(teamName));
         System.out.println("[INFO] Team '" + teamName + "' removed.");
     }
 
-    // -----------------------------------------------------------------------
-    // NEW: Public Game Room - Additional Feature 2
-    // Players join a random public room; game starts when the room is full
-    // or when a player types "start" and min players are present.
-    // ASSUMPTION: Public rooms use random questions since players are strangers.
-    // -----------------------------------------------------------------------
+
 
     public void joinPublicRoom(User user, ClientHandler handler) {
-        // Find an open room that isn't full and hasn't started yet
         GameRoom room = null;
         for (GameRoom r : gameRooms.values()) {
             if (!r.isGameStarted() && !r.isFull()) {
@@ -425,7 +356,7 @@ public class GameServer {
             }
         }
 
-        // No room found - create a new one
+
         if (room == null) {
             roomCounter++;
             String id = "Room-" + roomCounter;
@@ -446,30 +377,24 @@ public class GameServer {
 
         final GameRoom finalRoom = room;
 
-        // Auto-start immediately if room is now full
+
         if (finalRoom.isFull()) {
             launchRoomGame(finalRoom);
             return;
         }
 
-        // Otherwise wait for more players or a "start" command
+
         waitForRoomStart(user, handler, finalRoom);
 
-        // Fix: block here until the game finishes.
-        // launchRoomGame() sets inGame=true before starting the session thread,
-        // so the main menu loop won't run until the game is completely done.
+
         while (handler.isInGame()) {
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
         }
     }
 
-    // Blocks on this handler's input until the player types "start" or '-' or disconnects.
-    // Uses a 200ms socket timeout so every player's loop can detect room.isGameStarted()
-    // quickly after another player types "start". Without this, a player blocked inside
-    // readLine() would compete with the GameSession for the same socket input.
-    // ASSUMPTION: 200ms is short enough to react quickly but not wasteful on CPU.
+
     private void waitForRoomStart(User user, ClientHandler handler, GameRoom room) {
-        handler.setSoTimeout(200); // short timeout so we can check gameStarted periodically
+        handler.setSoTimeout(200);
         try {
             while (!room.isGameStarted()) {
                 try {
@@ -494,41 +419,35 @@ public class GameServer {
                         return;
                     }
                 } catch (java.net.SocketTimeoutException e) {
-                    // Timeout fired - loop back and check room.isGameStarted() at the top.
-                    // This is how we detect when another player started the game.
+
                     continue;
                 } catch (Exception e) {
-                    // Real disconnect or error
+
                     room.removeMember(user);
                     if (room.getMemberCount() == 0) gameRooms.remove(room.getRoomId());
                     return;
                 }
             }
         } finally {
-            // Always reset the timeout so the socket works normally after this
             handler.setSoTimeout(0);
         }
     }
 
-    // Starts the GameSession for everyone in the room
+
     private void launchRoomGame(GameRoom room) {
-        if (room.isGameStarted()) return; // guard against double-launch
+        if (room.isGameStarted()) return;
 
         List<Question> questions = getRandomQuestions(publicRoomQuestions);
 
-        // Snapshot lists BEFORE setting any flags
+
         List<ClientHandler> roomHandlers = new ArrayList<>(room.getMemberHandlers());
         List<User>          roomMembers  = new ArrayList<>(room.getMembers());
 
-        // CRITICAL ORDER FIX: set inGame=true for ALL players BEFORE setGameStarted(true).
-        // Players in waitForRoomStart() exit the loop the moment they see gameStarted=true,
-        // then immediately check isInGame(). If inGame wasn't set yet, they skip the
-        // spin-wait and the main menu appears while the game is still running.
+
         for (ClientHandler h : roomHandlers) {
             h.setInGame(true);
         }
 
-        // Now it is safe to set gameStarted - anyone who detects it will also see inGame=true
         room.setGameStarted(true);
         gameRooms.remove(room.getRoomId());
 
@@ -536,32 +455,27 @@ public class GameServer {
                 roomHandlers, roomMembers,
                 questions, questionTimeoutSeconds, "public", authManager);
 
-        // Fix: count questions for admin stats
+
         adminStats.recordQuestionsPlayed(questions.size());
 
         room.broadcast("[INFO] Starting game now...");
         new Thread(() -> {
-            // Wait 350ms before reading any answers.
-            // Players in waitForRoomStart() have a 200ms read timeout, so by 350ms
-            // all of them will have exited that loop and no thread competes for the socket.
+
             try { Thread.sleep(350); } catch (InterruptedException ignored) {}
             session.start();
-            // Game over - release all players back to the main menu
+
             for (ClientHandler h : roomHandlers) {
                 h.setInGame(false);
             }
         }).start();
     }
 
-    // -----------------------------------------------------------------------
-    // Getters
-    // -----------------------------------------------------------------------
 
     public int          getMaxPlayersPerTeam() { return maxPlayersPerTeam; }
     public int          getMinPlayersPerTeam() { return minPlayersPerTeam; }
     public QuestionBank getQuestionBank()      { return questionBank; }
-    public AdminStats   getAdminStats()        { return adminStats; }   // NEW: for admin panel
-    public AuthManager  getAuthManager()       { return authManager; }  // NEW: for admin panel
+    public AdminStats   getAdminStats()        { return adminStats; }
+    public AuthManager  getAuthManager()       { return authManager; }
     // Fix: always read from the actual map so the count never drifts
     public int          getConnectedCount()    { return connectedClients.size(); }
 

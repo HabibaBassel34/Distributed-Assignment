@@ -8,16 +8,7 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * LookupServer - Additional Feature 1
- * A separate server just for serving questions to the GameServer.
- * GameServer connects to this server and asks for questions by category/difficulty.
- * Runs on port 5556 by default (different from game server port 5555).
- *
- * ASSUMPTION: Both servers run on the same machine (localhost).
- * ASSUMPTION: Questions are loaded from data/questions.txt.
- * ASSUMPTION: If use_lookup_server is false in config, GameServer uses local QuestionBank instead.
- */
+
 public class LookupServer {
 
     private static final int DEFAULT_PORT = 5556;
@@ -35,7 +26,7 @@ public class LookupServer {
         System.out.println("[LookupServer] Loaded " + questions.size() + " questions on port " + port);
     }
 
-    // Main loop - wait for connections and handle each on a new thread
+
     public void start() {
         System.out.println("[LookupServer] Listening on port " + port + "...");
         try (ServerSocket serverSocket = new ServerSocket(port)) {
@@ -49,8 +40,7 @@ public class LookupServer {
         }
     }
 
-    // Handle one request: read query, send matching questions, send "END"
-    // ASSUMPTION: One request per connection - connection closes after response
+
     private void handleRequest(Socket socket) {
         try (
             BufferedReader in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -58,7 +48,6 @@ public class LookupServer {
         ) {
             String request = in.readLine();
 
-            // Log the incoming request so we can see what the GameServer asked for
             System.out.println("[LookupServer] Request from " + socket.getInetAddress()
                     + " -> " + request);
 
@@ -70,20 +59,17 @@ public class LookupServer {
                 return;
             }
 
-            // Find matching questions and send them one per line
             List<Question> result = processQuery(request.trim());
 
-            // Log how many questions we're sending back
             System.out.println("[LookupServer] Sending " + result.size() + " question(s):");
             for (Question q : result) {
-                // Show a short preview of each question in the log
                 String preview = q.getText().length() > 45
                         ? q.getText().substring(0, 45) + "..." : q.getText();
                 System.out.println("[LookupServer]   [" + q.getCategory()
                         + "/" + q.getDifficulty() + "] " + preview);
                 out.println(serialize(q));
             }
-            out.println("END"); // tells the client we're done
+            out.println("END");
             System.out.println("[LookupServer] Done. Sent END to client.");
 
         } catch (IOException e) {
@@ -93,24 +79,17 @@ public class LookupServer {
         }
     }
 
-    /**
-     * Parses a QUERY line and returns matching shuffled questions.
-     * Format: QUERY category=Geography difficulty=easy count=5
-     * Use * as wildcard: QUERY category=* difficulty=* count=10
-     *
-     * ASSUMPTION: Unknown fields in the query are ignored.
-     * ASSUMPTION: Default count is 10 if not specified or invalid.
-     */
+
     private List<Question> processQuery(String request) {
         if (!request.startsWith("QUERY")) {
-            return new ArrayList<>(); // unrecognized request
+            return new ArrayList<>();
         }
 
-        String category   = null; // null means "any category"
-        String difficulty = null; // null means "any difficulty"
+        String category   = null;
+        String difficulty = null;
         int    count      = 10;
 
-        // Parse each key=value token after QUERY
+
         String[] tokens = request.split("\\s+");
         for (int i = 1; i < tokens.length; i++) {
             String[] kv = tokens[i].split("=", 2);
@@ -123,12 +102,12 @@ public class LookupServer {
             }
         }
 
-        // Log parsed parameters so we can verify what was understood
+
         System.out.println("[LookupServer] Parsed -> category=" + (category == null ? "*" : category)
                 + " | difficulty=" + (difficulty == null ? "*" : difficulty)
                 + " | count=" + count);
 
-        // Filter the full question list
+
         List<Question> filtered = new ArrayList<>();
         for (Question q : questions) {
             boolean catMatch  = (category   == null || q.getCategory().equalsIgnoreCase(category));
@@ -138,15 +117,11 @@ public class LookupServer {
 
         System.out.println("[LookupServer] Matched " + filtered.size()
                 + " question(s), will return " + Math.min(count, filtered.size()));
-        Collections.shuffle(filtered); // randomize so each call returns a different set
+        Collections.shuffle(filtered);
         return filtered.subList(0, Math.min(count, filtered.size()));
     }
 
-    /**
-     * Turns a Question into a single pipe-separated string to send over the socket.
-     * Format: id|category|difficulty|text|A|B|C|D|answer
-     * ASSUMPTION: Questions always have exactly 4 choices.
-     */
+
     private String serialize(Question q) {
         List<String> ch = q.getChoices();
         String c0 = ch.size() > 0 ? ch.get(0) : "";
@@ -158,7 +133,7 @@ public class LookupServer {
              + q.getCorrectAnswer();
     }
 
-    // Run as standalone process: java server.LookupServer [port]
+
     public static void main(String[] args) {
         int port = DEFAULT_PORT;
         if (args.length > 0) {
