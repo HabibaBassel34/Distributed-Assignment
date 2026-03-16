@@ -18,6 +18,11 @@ public class GameSession {
     private String gameType;
     private AuthManager authManager;
 
+    // Tracks players who disconnected mid-game so we can notify others and
+    // mark them in the final results instead of showing 0 pts with no explanation.
+    // ConcurrentHashMap.newKeySet() gives a thread-safe Set (used from executor threads).
+    private Set<String> disconnectedPlayers = ConcurrentHashMap.newKeySet();
+
     private static final int SCORE_EASY = 10;
     private static final int SCORE_MEDIUM = 20;
     private static final int SCORE_HARD = 30;
@@ -66,15 +71,34 @@ public class GameSession {
         CountDownLatch latch = new CountDownLatch(1);
         ExecutorService executor = Executors.newCachedThreadPool();
 
+        // Set a read timeout slightly longer than the question timeout on every handler.
+        // This guarantees executor tasks unblock and exit even if the player never answers.
+        // Without this, tasks from the last question stay alive after the game ends and
+        // consume the player's next menu input, causing "Invalid input. Enter A, B, C, or D."
+        // ASSUMPTION: extra 2 seconds is enough margin above the question timeout.
+        int taskTimeout = (questionTimeoutSeconds + 2) * 1000;
+        for (ClientHandler h : handlers) {
+            h.setSoTimeout(taskTimeout);
+        }
+
         for (int i = 0; i < handlers.size(); i++) {
             final ClientHandler handler = handlers.get(i);
             final User player = players.get(i);
             executor.submit(() -> {
                 try {
+                    // Skip reading if this player already disconnected in a previous question
+                    if (disconnectedPlayers.contains(player.getUsername())) return;
+
                     while (!Thread.currentThread().isInterrupted()) {
                         String answer = handler.readLine();
-                        if (answer == null)
+                        if (answer == null) {
+                            // null means the socket closed - player disconnected
+                            // Only notify once (in case multiple questions detect it)
+                            if (disconnectedPlayers.add(player.getUsername())) {
+                                broadcast("[!] " + player.getName() + " disconnected from the game.");
+                            }
                             break;
+                        }
                         answer = answer.trim().toUpperCase();
                         if (!answer.matches("[ABCD]")) {
                             handler.send("Invalid input. Enter A, B, C, or D.");
@@ -86,7 +110,13 @@ public class GameSession {
                             latch.countDown();
                         break;
                     }
-                } catch (Exception ignored) {
+                } catch (java.net.SocketTimeoutException e) {
+                    // Question timed out - task exits cleanly, no answer recorded
+                } catch (Exception e) {
+                    // IOException or similar - treat as disconnection
+                    if (disconnectedPlayers.add(player.getUsername())) {
+                        broadcast("[!] " + player.getName() + " disconnected from the game.");
+                    }
                 }
             });
         }
@@ -99,6 +129,12 @@ public class GameSession {
         }
 
         executor.shutdownNow();
+
+        // Reset the socket timeout so the socket works normally after this question
+        for (ClientHandler h : handlers) {
+            h.setSoTimeout(0);
+        }
+
         evaluateAnswers(q, answersMap);
     }
 
@@ -131,6 +167,9 @@ public class GameSession {
             String username = player.getUsername();
             String given = answersMap.get(username);
 
+            // Skip per-question result for disconnected players - they already got a notice
+            if (disconnectedPlayers.contains(username)) continue;
+
             String resultLine;
             if (given == null) {
                 resultLine = player.getName() + " - No answer (0 pts)";
@@ -152,7 +191,11 @@ public class GameSession {
         broadcast("\n  📊 Current Scores:");
         for (int i = 0; i < players.size(); i++) {
             String u = players.get(i).getUsername();
-            broadcast("  " + players.get(i).getName() + ": " + scores.get(u) + " pts");
+            if (disconnectedPlayers.contains(u)) {
+                broadcast("  " + players.get(i).getName() + ": DISCONNECTED");
+            } else {
+                broadcast("  " + players.get(i).getName() + ": " + scores.get(u) + " pts");
+            }
         }
     }
 
@@ -179,7 +222,12 @@ public class GameSession {
         for (Map.Entry<String, Integer> entry : sorted) {
             User user = players.stream().filter(p -> p.getUsername().equals(entry.getKey())).findFirst().orElse(null);
             String name = user != null ? user.getName() : entry.getKey();
-            broadcast("  #" + rank++ + " " + name + " - " + entry.getValue() + " pts");
+            if (disconnectedPlayers.contains(entry.getKey())) {
+                // Show disconnected players at the end without a rank number
+                broadcast("  -- " + name + " - DISCONNECTED (left during game)");
+            } else {
+                broadcast("  #" + rank++ + " " + name + " - " + entry.getValue() + " pts");
+            }
         }
 
         broadcast("\n--- Your Question Breakdown ---");
@@ -196,6 +244,8 @@ public class GameSession {
         int total = questions.size();
         for (int i = 0; i < players.size(); i++) {
             User player = players.get(i);
+            // Don't save a score record for players who disconnected mid-game
+            if (disconnectedPlayers.contains(player.getUsername())) continue;
             int score = scores.getOrDefault(player.getUsername(), 0);
             long correct = results.get(player.getUsername()).stream()
                     .filter(r -> r.contains("✅")).count();

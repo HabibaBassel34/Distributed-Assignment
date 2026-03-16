@@ -18,6 +18,10 @@ public class ClientHandler implements Runnable {
     private User currentUser;
     private volatile boolean running = true;
 
+    // Fix for Problem 1 & 2: when a GameSession is running, the menu loop must
+    // not call readLine() — GameSession owns the input stream during a game.
+    private volatile boolean inGame = false;
+
     public ClientHandler(Socket socket, AuthManager authManager,
             QuestionBank questionBank, GameServer gameServer) {
         this.socket = socket;
@@ -41,7 +45,13 @@ public class ClientHandler implements Runnable {
                 return;
             }
 
-            handleMainMenu();
+            // NEW: if the logged-in user is "admin", show the admin panel instead of the game menu
+            // ASSUMPTION: admin username is exactly "admin" (case-sensitive) and is in users.txt
+            if (currentUser.getUsername().equals("admin")) {
+                showAdminPanel();
+            } else {
+                handleMainMenu();
+            }
 
         } catch (IOException e) {
             System.out.println("[INFO] Client disconnected: " +
@@ -113,7 +123,6 @@ public class ClientHandler implements Runnable {
         if (name == null || name.equals("-"))
             return false;
 
-        // Check username i
         String username;
         while (true) {
             send("Username: ");
@@ -125,7 +134,6 @@ public class ClientHandler implements Runnable {
             if (authManager.getUser(username) != null) {
                 send("ERROR 409: Username '" + username + "' is already taken.");
 
-                // Generate suggestions
                 String s1 = username + "_" + (int) (Math.random() * 900 + 100);
                 String s2 = username + (int) (Math.random() * 900 + 100);
                 String s3 = username.substring(0, 1).toUpperCase() + username.substring(1) + "_"
@@ -143,17 +151,10 @@ public class ClientHandler implements Runnable {
                     return false;
 
                 switch (pick.trim()) {
-                    case "1":
-                        username = s1;
-                        break;
-                    case "2":
-                        username = s2;
-                        break;
-                    case "3":
-                        username = s3;
-                        break;
-                    default:
-                        continue;
+                    case "1": username = s1; break;
+                    case "2": username = s2; break;
+                    case "3": username = s3; break;
+                    default: continue;
                 }
 
                 if (authManager.getUser(username) != null) {
@@ -186,21 +187,40 @@ public class ClientHandler implements Runnable {
 
     private void handleMainMenu() throws IOException {
         while (running) {
+            // If a GameSession has taken over this handler's input stream,
+            // block here and do NOT call readLine() until the game ends.
+            if (inGame) {
+                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                continue;
+            }
+
             send("\n==============================================");
             send("  Main Menu - Hello, " + currentUser.getName() + "!");
             send("==============================================");
             send("  1) Play Single Player");
             send("  2) Play Multiplayer (Teams)");
-            send("  3) View My Score History");
-            send("  4) View Available Categories");
+            send("  3) Join Public Game Room");  // NEW - Additional Feature 2
+            send("  4) Play Random Trivia");      // NEW - Additional Feature 3
+            send("  5) View My Score History");
+            send("  6) View Available Categories");
             send("  -) Quit");
             send("Enter choice: ");
+
+            // Small pause before reading — gives the game thread time to set
+            // inGame=true if a multiplayer match was just triggered, so we
+            // don't call readLine() and accidentally consume the player's
+            // first game answer as a menu choice.
+            try { Thread.sleep(150); } catch (InterruptedException ignored) {}
+            if (inGame) continue;
 
             String choice = readLine();
             if (choice == null || choice.trim().equals("-")) {
                 send("Thanks for playing! Goodbye, " + currentUser.getName() + "!");
                 break;
             }
+
+            // Double-check: if game started while blocked on readLine, discard input
+            if (inGame) continue;
 
             switch (choice.trim()) {
                 case "1":
@@ -210,9 +230,17 @@ public class ClientHandler implements Runnable {
                     handleMultiplayerSetup();
                     break;
                 case "3":
-                    showScoreHistory();
+                    // NEW: Additional Feature 2 - Public Game Room
+                    gameServer.joinPublicRoom(currentUser, this);
                     break;
                 case "4":
+                    // NEW: Additional Feature 3 - Random Trivia
+                    handleRandomTrivia();
+                    break;
+                case "5":
+                    showScoreHistory();
+                    break;
+                case "6":
                     showCategories();
                     break;
                 default:
@@ -221,17 +249,65 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // 1 Player Setup
+    // -----------------------------------------------------------------------
+    // NEW: Admin Panel - Additional Feature 4
+    // Shown instead of the game menu when username == "admin"
+    // ASSUMPTION: Admin can only view stats - cannot play games
+    // -----------------------------------------------------------------------
+
+    private void showAdminPanel() throws IOException {
+        while (running) {
+            send("\n==============================================");
+            send("           ADMIN PANEL                      ");
+            send("==============================================");
+            send("  1) Total Connected Players");
+            send("  2) Player With Most Wins");
+            send("  3) Total Questions Played (this session)");
+            send("  4) Highest Score Ever Recorded");
+            send("  -) Logout");
+            send("Enter choice: ");
+
+            String choice = readLine();
+            if (choice == null || choice.trim().equals("-")) {
+                send("Admin logged out.");
+                break;
+            }
+
+            AdminStats stats = gameServer.getAdminStats();
+
+            switch (choice.trim()) {
+                case "1":
+                    // Fix: read directly from the connected clients map (never drifts)
+                    send("Total connected players: " + gameServer.getConnectedCount());
+                    break;
+                case "2":
+                    // getAllUsers() comes from AuthManager via GameServer
+                    send("Player with most wins: "
+                            + stats.getMostWins(gameServer.getAuthManager().getAllUsers()));
+                    break;
+                case "3":
+                    send("Total questions played this session: " + stats.getTotalQuestionsPlayed());
+                    break;
+                case "4":
+                    send("Highest score ever: "
+                            + stats.getHighestScore(gameServer.getAuthManager().getAllUsers()) + " pts");
+                    break;
+                default:
+                    send("Invalid option. Enter 1-4 or - to logout.");
+            }
+        }
+    }
+
+    // Single Player Setup
+
     private void handleSinglePlayerSetup() throws IOException {
         send("\n--- Single Player Setup ---");
 
         String category = selectCategory();
-        if (category == null)
-            return;
+        if (category == null) return;
 
         String difficulty = selectDifficulty();
-        if (difficulty == null)
-            return;
+        if (difficulty == null) return;
 
         int maxAvailable = questionBank.getAvailableCount(category, difficulty);
         if (maxAvailable == 0) {
@@ -242,13 +318,44 @@ public class ClientHandler implements Runnable {
         send("Available questions: " + maxAvailable);
         send("How many questions would you like? (1-" + maxAvailable + "): ");
         int numQuestions = readInt(1, maxAvailable);
-        if (numQuestions == -1)
-            return;
+        if (numQuestions == -1) return;
 
         GameSession session = gameServer.createSinglePlayerSession(
                 currentUser, category, difficulty, numQuestions);
-        if (session != null)
+        if (session != null) {
+            // Mark as in-game so handleMainMenu() stops reading from socket
+            setInGame(true);
             session.start();
+            setInGame(false);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // NEW: Random Trivia - Additional Feature 3
+    // Picks questions from all categories and difficulties randomly.
+    // ASSUMPTION: Player just picks how many questions (1 to total bank size).
+    // -----------------------------------------------------------------------
+
+    private void handleRandomTrivia() throws IOException {
+        send("\n--- Random Trivia ---");
+        send("Questions will be picked randomly from all categories and difficulties.");
+
+        int max = questionBank.getTotalCount(); // total questions in the bank
+        if (max == 0) {
+            send("No questions available.");
+            return;
+        }
+
+        send("How many questions? (1-" + max + "): ");
+        int numQuestions = readInt(1, max);
+        if (numQuestions == -1) return;
+
+        GameSession session = gameServer.createRandomSession(currentUser, numQuestions);
+        if (session != null) {
+            setInGame(true);
+            session.start();
+            setInGame(false);
+        }
     }
 
     // Multiplayer
@@ -265,14 +372,9 @@ public class ClientHandler implements Runnable {
             return;
 
         switch (choice.trim()) {
-            case "1":
-                handleCreateTeam();
-                break;
-            case "2":
-                handleJoinTeam();
-                break;
-            default:
-                send("Invalid option.");
+            case "1": handleCreateTeam(); break;
+            case "2": handleJoinTeam(); break;
+            default: send("Invalid option.");
         }
     }
 
@@ -280,8 +382,7 @@ public class ClientHandler implements Runnable {
         send("\n--- Create Team ---");
         send("Enter a unique team name: ");
         String teamName = readLine();
-        if (teamName == null || teamName.trim().equals("-"))
-            return;
+        if (teamName == null || teamName.trim().equals("-")) return;
         teamName = teamName.trim();
 
         if (gameServer.teamExists(teamName)) {
@@ -290,12 +391,10 @@ public class ClientHandler implements Runnable {
         }
 
         String category = selectCategory();
-        if (category == null)
-            return;
+        if (category == null) return;
 
         String difficulty = selectDifficulty();
-        if (difficulty == null)
-            return;
+        if (difficulty == null) return;
 
         int maxAvailable = questionBank.getAvailableCount(category, difficulty);
         if (maxAvailable == 0) {
@@ -305,19 +404,17 @@ public class ClientHandler implements Runnable {
 
         send("How many questions? (1-" + maxAvailable + "): ");
         int numQuestions = readInt(1, maxAvailable);
-        if (numQuestions == -1)
-            return;
+        if (numQuestions == -1) return;
 
         send("Max players per team (1-" + gameServer.getMaxPlayersPerTeam() + "): ");
         int maxPlayers = readInt(1, gameServer.getMaxPlayersPerTeam());
-        if (maxPlayers == -1)
-            return;
+        if (maxPlayers == -1) return;
 
         Team team = gameServer.createTeam(teamName, currentUser, this,
                 category, difficulty, numQuestions, maxPlayers);
         send("Team '" + teamName + "' created! You are the team leader.");
-        send("Waiting for the opposing team to join and be ready...");
-        send("(Type 'start' when both teams are ready, or '-' to cancel)");
+        send("Waiting for " + (maxPlayers - 1) + " more player(s) to join your team...");
+        send("Once your team is full, type 'start' to look for an opponent. Or '-' to cancel.");
 
         team.waitForGame(this);
     }
@@ -335,13 +432,12 @@ public class ClientHandler implements Runnable {
         }
         send("Enter team name to join: ");
         String teamName = readLine();
-        if (teamName == null || teamName.trim().equals("-"))
-            return;
+        if (teamName == null || teamName.trim().equals("-")) return;
 
         gameServer.joinTeam(teamName.trim(), currentUser, this);
     }
 
-    // Score History
+    // Score / Category helpers
 
     private void showScoreHistory() {
         send("\n--- Your Score History ---");
@@ -380,8 +476,7 @@ public class ClientHandler implements Runnable {
         }
         send("Enter number: ");
         int idx = readInt(1, categories.size());
-        if (idx == -1)
-            return null;
+        if (idx == -1) return null;
         return categories.get(idx - 1);
     }
 
@@ -392,28 +487,32 @@ public class ClientHandler implements Runnable {
         send("  3) Hard");
         send("Enter number: ");
         int idx = readInt(1, 3);
-        if (idx == -1)
-            return null;
-        return new String[] { "easy", "medium", "hard" }[idx - 1];
+        if (idx == -1) return null;
+        return new String[]{"easy", "medium", "hard"}[idx - 1];
     }
 
     private int readInt(int min, int max) throws IOException {
         while (true) {
             String line = readLine();
-            if (line == null || line.trim().equals("-"))
-                return -1;
+            if (line == null || line.trim().equals("-")) return -1;
             try {
                 int val = Integer.parseInt(line.trim());
-                if (val >= min && val <= max)
-                    return val;
+                if (val >= min && val <= max) return val;
                 send("Please enter a number between " + min + " and " + max + ": ");
             } catch (NumberFormatException e) {
-                send("Invalid input. Please enter a number: ");
+                // Feature 11: Error handling - invalid non-numeric input
+                send("Invalid input '" + line.trim() + "'. Please enter a number: ");
             }
         }
     }
 
-    // I/p O/p
+    // I/O
+
+    // Disconnection handling: GameSession checks this to skip dead sockets
+    public boolean isConnected() {
+        return running && socket != null && !socket.isClosed();
+    }
+
     public void send(String message) {
         if (out != null && !socket.isClosed()) {
             out.println(message);
@@ -421,8 +520,7 @@ public class ClientHandler implements Runnable {
     }
 
     public String readLine() throws IOException {
-        if (in == null)
-            return null;
+        if (in == null) return null;
         try {
             String line = in.readLine();
             if (line != null && line.trim().equals("-")) {
@@ -430,10 +528,30 @@ public class ClientHandler implements Runnable {
                 return "-";
             }
             return line;
+        } catch (java.net.SocketTimeoutException e) {
+            // Timeout is NOT a disconnect - rethrow without marking client as dead.
+            // waitForRoomStart() uses this to periodically check room.isGameStarted().
+            throw e;
         } catch (IOException e) {
             running = false;
             throw e;
         }
+    }
+
+    // Sets a read timeout on the socket in milliseconds.
+    // Pass 0 to disable (block forever). Used by waitForRoomStart().
+    public void setSoTimeout(int millis) {
+        try { socket.setSoTimeout(millis); } catch (IOException ignored) {}
+    }
+
+    // Fix for Problem 1 & 2: GameSession calls setInGame(true) before starting
+    // and setInGame(false) when done, so the menu loop stays out of the way.
+    public void setInGame(boolean value) {
+        this.inGame = value;
+    }
+
+    public boolean isInGame() {
+        return inGame;
     }
 
     public boolean isRunning() {
@@ -450,9 +568,7 @@ public class ClientHandler implements Runnable {
             gameServer.unregisterClient(currentUser.getUsername());
         }
         try {
-            if (!socket.isClosed())
-                socket.close();
-        } catch (IOException ignored) {
-        }
+            if (!socket.isClosed()) socket.close();
+        } catch (IOException ignored) {}
     }
 }

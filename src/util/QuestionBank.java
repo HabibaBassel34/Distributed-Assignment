@@ -42,6 +42,19 @@ public class QuestionBank {
                 .count();
     }
 
+    // Returns count questions from ALL categories and difficulties, fully mixed.
+    // ASSUMPTION: count is capped at bank size if it exceeds available questions.
+    public List<Question> getRandomQuestions(int count) {
+        List<Question> copy = new ArrayList<>(allQuestions);
+        Collections.shuffle(copy);
+        return copy.subList(0, Math.min(count, copy.size()));
+    }
+
+    // Total questions in the bank - used to cap the player's count input
+    public int getTotalCount() {
+        return allQuestions.size();
+    }
+
     public List<Question> getAllQuestions() {
         return Collections.unmodifiableList(allQuestions);
     }

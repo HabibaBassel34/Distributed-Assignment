@@ -3,3 +3,18 @@ server_port=5555
 min_players_per_team=1
 max_players_per_team=4
 question_timeout_seconds=15
+
+# Public Game Room settings (Additional Feature 2)
+# min = minimum players needed before someone can type "start"
+# max = game auto-starts when this many players join
+# ASSUMPTION: defaults are 2 min, 4 max, 5 questions per public room game
+min_players_per_room=2
+max_players_per_room=4
+public_room_questions=5
+
+# Lookup Server settings (Additional Feature 1)
+# Set use_lookup_server=true then run LookupServer.java on a separate terminal
+# ASSUMPTION: LookupServer runs on localhost port 5556 by default
+use_lookup_server=true
+lookup_server_host=localhost
+lookup_server_port=5556
